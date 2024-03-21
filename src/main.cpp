@@ -1,83 +1,81 @@
 #include <Arduino.h>
-#include <ArduinoSTL.h>
+#include <array>
+#include <bitset>
 
+
+//-----------------------------------------//
+//CHANGE IF LED CUBE HAS ANOTHER LEDS OF 8//
+constexpr uint8_t LED_COUNT     = 8;
 constexpr uint8_t PWD_PIN_COUNT = 4;
 constexpr uint8_t GND_PIN_COUNT = 2;
+//-----------------------------------------//
+
+using pwd_pins_t  = std::array<uint8_t, PWD_PIN_COUNT>;
+using gnd_pins_t  = std::array<uint8_t, GND_PIN_COUNT>;
+using led_state_t = std::bitset<LED_COUNT>;
+
+using it_pin_t = pwd_pins_t::iterator;
+
+
 
 struct led_cube_t{
-  uint8_t  configuration{};
-  uint8_t pins_pwd[PWD_PIN_COUNT];
-  uint8_t pins_gnd[GND_PIN_COUNT];
-  bool need_sync{true};
+  led_state_t configuration{};
+  pwd_pins_t  pins_pwd;
+  gnd_pins_t  pins_gnd;
 
-  led_cube_t(uint8_t *pwd, uint8_t *gnd);
+  led_cube_t(const pwd_pins_t &pwd, const gnd_pins_t &gnd);
 
   void set_pin_mode();
-  void set_state(uint8_t state);
+  void set_state(led_state_t state);
+
   void sync();
 };
 
 
-led_cube_t::led_cube_t(uint8_t *pwd, uint8_t *gnd){
-  for(int i = 0; i < PWD_PIN_COUNT; ++i){
-    pins_pwd[i] = pwd[i];
-  }
-  for(int i = 0; i < GND_PIN_COUNT; ++i){
-    pins_gnd[i] = gnd[i];
-  }
-}
+led_cube_t::led_cube_t(const pwd_pins_t &pwd, const gnd_pins_t &gnd): pins_pwd(pwd), pins_gnd(gnd){}
 
 void led_cube_t::set_pin_mode(){
-  for(int i = 0; i < PWD_PIN_COUNT; ++i){
-    pinMode(pins_pwd[i], OUTPUT);
+  for(auto &pin: pins_pwd){
+    pinMode(pin, OUTPUT);
   }
-  for(int i = 0; i < GND_PIN_COUNT; ++i){
-    pinMode(pins_gnd[i], OUTPUT);
+  for(auto &pin: pins_gnd){
+    pinMode(pin, OUTPUT);
   }
+
 }
 
-void led_cube_t::set_state(uint8_t state){
+void led_cube_t::set_state(led_state_t state){
   if(configuration == state){
     return;
   }
   configuration = state;
-  need_sync = true;
 }
 
 void led_cube_t::sync(){
-  if(!need_sync){
-    return;
+  for(auto &pin: pins_pwd){
+    digitalWrite(pin, LOW);
+  }
+  for(auto &pin: pins_gnd){
+    digitalWrite(pin, LOW);
   }
 
-  for(size_t i = 0; i < PWD_PIN_COUNT; ++i){
-    digitalWrite(pins_pwd[i], LOW);
-  }
-  for(size_t i = 0; i < GND_PIN_COUNT; ++i){
-    digitalWrite(pins_gnd[i], HIGH);
-  }
-
-  bool flag;
-  for(size_t layer = 0; layer < GND_PIN_COUNT; ++layer){
-    flag = false;
-    for(size_t i = 0; i < PWD_PIN_COUNT; ++i){
-      size_t led   = layer * PWD_PIN_COUNT + i;
-      size_t mask  = (1 << led);
-      size_t state = (configuration & mask) != 0;
-
-      if(state){
-        flag = true;
-        digitalWrite(pins_pwd[i], HIGH);
-      }
+  size_t led_index = 0;
+  for(auto pin_gnd: pins_pwd){
+    bool flag = false;
+    for(auto pin_pwd: pins_pwd){
+      digitalWrite(pin_pwd, configuration[led_index]);
+      ++led_index;
     }
-    
+
     if(flag){
-      digitalWrite(pins_gnd[layer], LOW);
+      digitalWrite(pin_gnd, LOW);
+      flag = false;
     }
   }
-  need_sync = false;
+ 
 }
-
-constexpr uint8_t states[] = {
+constexpr size_t count_states = 10;
+std::array<led_state_t, count_states> states{
   0b00000001,
   0b00000010,
   0b00000100,
@@ -91,14 +89,9 @@ constexpr uint8_t states[] = {
 };
 
 size_t current_state{};
-constexpr size_t state_count = sizeof(states) / sizeof(uint8_t);
-
 size_t last_time{};
-size_t operation_duration{};
-uint8_t pin_pwd[] = {9, 10, 11, 12};
-uint8_t pin_gnd[] = {5, 6};
 
-led_cube_t cube = led_cube_t(pin_pwd, pin_gnd);
+led_cube_t cube = led_cube_t({9, 10, 11, 12}, {5, 6});
 
 void setup() {
   Serial.begin(9600);
@@ -108,13 +101,12 @@ void setup() {
 
 void loop() {
   size_t current_time = millis();
-  if((current_time - last_time) > (100 - operation_duration)){
+  if((current_time - last_time) > 100){
     last_time = current_time;
-    Serial.println(last_time);
-    current_state = (current_state + 1);/// % state_count;
-    cube.set_state(current_state);
+
+    current_state = (current_state + 1) % count_states;
+    cube.set_state(states[current_state]);
     cube.sync();
-    operation_duration = millis() - last_time;
   }
 }
 
